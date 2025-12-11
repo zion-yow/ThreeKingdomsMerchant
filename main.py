@@ -15,8 +15,146 @@ except ImportError:
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-# --- 行情分析 (Plotext版) ---
+# --- 游戏初始化与菜单流程 ---
+
+def start_menu():
+    """游戏启动菜单"""
+    while True:
+        clear_screen()
+        print("="*40)
+        print("   🗡️  三国豪商：家族兴衰录 (文字版 v0.4) 🗡️")
+        print("="*40)
+        print("\n1. 🏳️‍🌈  建立新商号 (开始游戏)")
+        print("2. 💾  读取旧进度")
+        print("q. 🚪  退出")
+        
+        choice = input("\n请选择: ").lower()
+        
+        if choice == '1':
+            setup_new_game()
+            start_game_loop() # 进入游戏循环
+            return
+        elif choice == '2':
+            if state.has_save_file():
+                success, msg = state.load_game()
+                print(msg)
+                if success:
+                    input("按回车进入游戏...")
+                    start_game_loop() # 进入游戏循环
+                    return
+                else:
+                    input("按回车返回...")
+            else:
+                print("❌ 未找到存档文件。")
+                input("按回车返回...")
+        elif choice == 'q':
+            sys.exit()
+
+def setup_new_game():
+    """新游戏角色创建流程"""
+    clear_screen()
+    print("=== 📝 登记造册 ===")
+    
+    name = input("请输入家主姓名 (如: 吕不韦): ").strip()
+    if not name: name = "无名氏"
+    
+    house = input("请输入商号名称 (如: 奇货居): ").strip()
+    if not house: house = "流浪商队"
+    
+    print("\n请选择起家之地:")
+    starter_cities = ["luo_yang", "xu_chang", "ye_cheng", "jian_ye", "cheng_du"]
+    for idx, cid in enumerate(starter_cities):
+        city_name = CITIES_CONFIG[cid]['name']
+        city_desc = CITIES_CONFIG[cid]['desc']
+        print(f"{idx+1}. {city_name} - {city_desc}")
+    
+    city_choice = input("序号: ")
+    try:
+        c_idx = int(city_choice) - 1
+        if 0 <= c_idx < len(starter_cities):
+            start_city = starter_cities[c_idx]
+        else:
+            start_city = "luo_yang"
+    except:
+        start_city = "luo_yang"
+        
+    # 初始化状态
+    state.reset_new_game()
+    state.create_character(name, house, start_city)
+    
+    # 初始触发一次历史事件，设定开局环境
+    market.apply_history_events()
+    input("\n按回车键开启你的商业传奇...")
+
+# --- 核心交互功能 ---
+
+def handle_trade(is_buying=True):
+    """处理买卖交互"""
+    action = "买入" if is_buying else "卖出"
+    keys = list(ITEMS_CONFIG.keys())
+    
+    clear_screen()
+    print_dashboard() # 保持上下文
+    print(f"\n[{action}] 选择商品:")
+    
+    current_city = state.player["current_city"]
+    market_prices = state.market_data.get(current_city, {})
+    
+    for idx, k in enumerate(keys):
+        curr_price = market_prices.get(k, 0)
+        stock = state.player["inventory"].get(k, 0)
+        print(f"{idx+1}. {ITEMS_CONFIG[k]['name']} (单价:{curr_price} | 库存:{stock})")
+    
+    print("0. 返回")
+    
+    try:
+        choice = input("序号: ")
+        if choice == '0': return
+        
+        c = int(choice) - 1
+        if 0 <= c < len(keys):
+            item = keys[c]
+            qty_str = input(f"请输入{action}数量: ")
+            if not qty_str: return
+            qty = int(qty_str)
+            
+            if is_buying:
+                ok, msg = trade.buy_item(item, qty)
+            else:
+                ok, msg = trade.sell_item(item, qty)
+            print(f"\n>>> {msg}")
+            input("按回车继续...")
+    except ValueError:
+        pass
+
+def handle_travel():
+    """处理移动交互"""
+    curr_city_id = state.player["current_city"]
+    neighbors = CITIES_CONFIG[curr_city_id]["connections"]
+    
+    print("\n[驿站] 选择目的地 (需耗时3个月/1回合):")
+    for idx, city_id in enumerate(neighbors):
+        print(f"{idx+1}. {CITIES_CONFIG[city_id]['name']}")
+    print("0. 取消")
+    
+    try:
+        choice = int(input("输入: ")) - 1
+        if 0 <= choice < len(neighbors):
+            target = neighbors[choice]
+            print(f"\n商队启程前往 {CITIES_CONFIG[target]['name']}...")
+            state.player["current_city"] = target
+            
+            # 移动会触发回合推进
+            print("路途遥远，时光飞逝...")
+            market.simulate_turn_fluctuation() 
+            input("\n按回车键到达...")
+        else:
+            print("取消移动。")
+    except ValueError:
+        pass
+
 def handle_market_analysis():
+    """行情分析 (Plotext版)"""
     clear_screen()
     city_id = state.player["current_city"]
     city_name = CITIES_CONFIG[city_id]["name"]
@@ -24,7 +162,6 @@ def handle_market_analysis():
     
     history_data = state.price_history[city_id]
     
-    # 交互循环
     while True:
         print("请选择要查看的商品走势:")
         items = list(ITEMS_CONFIG.keys())
@@ -60,7 +197,6 @@ def handle_market_analysis():
                     plt.theme("dark") # 适应深色终端
                     plt.xlabel("时间")
                     plt.ylabel("价格")
-                    # 标记当前点
                     plt.scatter([labels[-1]], [prices_show[-1]], color="red", label=f"当前: {prices_show[-1]}")
                     plt.show()
                 else:
@@ -73,25 +209,22 @@ def handle_market_analysis():
         except ValueError:
             pass
 
-# --- 政治系统菜单 ---
 def handle_politics():
+    """政治系统菜单"""
     while True:
         clear_screen()
         print("🏛️  【政治与发展】")
         print(f"💰 资金: {state.player['money']} | 📜 信誉: {state.player['reputation']}")
         print("-" * 40)
         
-        # 升级选项
-        upgrade_cost = 2000 + (state.player['max_capacity'] - 50) * 50 # 越升越贵
+        upgrade_cost = 2000 + (state.player['max_capacity'] - 50) * 50
         print(f"1. 📦 扩建车队 (花费 {upgrade_cost} 金钱 -> +10 基础载重)")
         
-        # 赈灾选项
         donate_cost = 1000
         print(f"2. 🍚 开仓赈灾 (花费 {donate_cost} 金钱 -> +15 信誉)")
         
-        # 招募列表
         print("\n👲 【招募门客】 (消耗信誉)")
-        recruit_map = {} # 映射序号到ID
+        recruit_map = {}
         counter = 3
         for rid, cfg in RETAINERS_CONFIG.items():
             status = "✅已招募" if rid in state.player["retainers"] else f"需 {cfg['cost']} 信誉"
@@ -116,17 +249,15 @@ def handle_politics():
             ok, msg = politics.recruit_retainer(recruit_map[choice])
             print(f"\n{msg}"); input("...")
 
-# --- 内务系统菜单 ---
 def handle_domestic():
+    """内务系统菜单"""
     while True:
         clear_screen()
         print("🏠 【商队内务】")
         
-        # 显示当前随从
         curr_id = state.player["active_retainer"]
         curr_name = RETAINERS_CONFIG[curr_id]["name"] if curr_id else "无"
         
-        # 效果描述
         buff_desc = "无加成"
         if curr_id:
             cfg = RETAINERS_CONFIG[curr_id]
@@ -164,8 +295,8 @@ def handle_domestic():
             state.player["active_retainer"] = rid
             print(f"已指派 {RETAINERS_CONFIG[rid]['name']} 负责商队事务。"); input("...")
 
-# --- 主界面 UI 微调 ---
 def print_dashboard():
+    """显示主界面面板"""
     curr_city_id = state.player["current_city"]
     curr_city_name = CITIES_CONFIG[curr_city_id]["name"]
     date_str = state.current_date
@@ -180,7 +311,6 @@ def print_dashboard():
     print("-" * 50)
     print(f"💰 资金: {state.player['money']}    | 📜 信誉: {state.player['reputation']}")
     
-    # 显示随从带来的额外载重
     max_cap = state.get_max_capacity()
     print(f"📦 载重: {sum(state.player['inventory'].values())}/{max_cap}")
     
@@ -211,7 +341,8 @@ def print_dashboard():
         print(f"{item['name']:<8}{price:<10}{trend} {event_mark}")
     print("="*50)
 
-# --- 游戏循环 ---
+# --- 游戏主循环 ---
+
 def start_game_loop():
     while True:
         clear_screen()
@@ -226,29 +357,19 @@ def start_game_loop():
         
         cmd = input("指令: ").lower()
         
-        if cmd == '1': trade.handle_trade_ui(True) # 注意：这里你需要把 main 里原本的 handle_trade 改个名或者移到 trade.py
-        elif cmd == '2': trade.handle_trade_ui(False)
+        if cmd == '1': handle_trade(True)
+        elif cmd == '2': handle_trade(False)
         elif cmd == '3': handle_market_analysis()
-        elif cmd == '4': 
-            # (这里省略 handle_travel 代码，保持原样即可)
-            # 为节省篇幅，假设 handle_travel 就在下面或已定义
-            handle_travel()
+        elif cmd == '4': handle_travel()
         elif cmd == '5': 
             print("\n原地休整..."); market.simulate_turn_fluctuation(); input("...")
         elif cmd == '6': handle_politics()
         elif cmd == '7': handle_domestic()
         elif cmd == '8': state.save_game(); input("保存成功...")
-        elif cmd == 'q': break
+        elif cmd == 'q': 
+            # 退出到主菜单，暂不保存
+            break
 
-# 为兼容性，将 main.py 里原来的 handle_trade 简单封装一下或直接使用
-# 建议将 UI 交互函数保留在 main.py，调用 logic 层的函数
-def handle_trade_wrapper(is_buying):
-    # 这里复制之前 main.py 的 handle_trade 逻辑即可
-    from main import handle_trade # 如果有定义
-    handle_trade(is_buying)
-
-# ... (保留原有的 handle_travel, handle_trade, start_menu 等函数) ...
-
+# --- 程序入口 ---
 if __name__ == "__main__":
-    # from main import start_menu
     start_menu()
