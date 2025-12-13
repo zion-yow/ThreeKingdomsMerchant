@@ -15,6 +15,19 @@ except ImportError:
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+# --- 辅助函数：日期转换 ---
+def get_numeric_date_str(turn):
+    """
+    将回合数转换为纯数字日期格式 YYYYMM
+    例如: 184年春(第0回合) -> 018401
+         184年夏(第1回合) -> 018402
+    """
+    year = state.start_year + (turn // 4)
+    season_idx = turn % 4
+    # 这里我们将 春夏秋冬 映射为 01, 02, 03, 04 月，方便排序和显示
+    month = season_idx + 1
+    return f"{year:04d}{month:02d}"
+
 # --- 游戏初始化与菜单流程 ---
 
 def start_menu():
@@ -188,16 +201,31 @@ def handle_market_analysis():
                 # 生成时间标签 (倒推)
                 curr_turn = state.turn_counter
                 turns = range(curr_turn - len(prices_show) + 1, curr_turn + 1)
-                labels = [state.get_date_by_turn(t) for t in turns]
+                
+                # 使用转换函数生成纯数字标签 (如 018401)
+                labels = [get_numeric_date_str(t) for t in turns]
+                # 同时生成一套可读的中文标签用于 xticks
+                labels_zh = [state.get_date_by_turn(t) for t in turns]
                 
                 if HAS_PLOTEXT:
                     plt.clf()
                     plt.title(f"{city_name} - {item_name} 价格走势")
-                    plt.plot(labels, prices_show, marker="dot", color="green")
+                    
+                    # 关键修改：不要直接传字符串列表给 x 轴，避免 ValueError
+                    # 使用索引作为 x 轴，然后手动设置标签
+                    x_indices = list(range(len(labels)))
+                    
+                    plt.plot(x_indices, prices_show, marker="dot", color="green")
                     plt.theme("dark") # 适应深色终端
-                    plt.xlabel("时间")
+                    plt.xlabel("时间 (YYYYMM)")
                     plt.ylabel("价格")
-                    plt.scatter([labels[-1]], [prices_show[-1]], color="red", label=f"当前: {prices_show[-1]}")
+                    
+                    # 使用转换后的数字格式显示标签，或者为了可读性使用中文
+                    # 这里我们使用您要求的数字格式作为底层数据，但展示时使用 xticks 避免解析错误
+                    plt.xticks(x_indices, labels)
+                    
+                    # 标记当前点
+                    plt.scatter([x_indices[-1]], [prices_show[-1]], color="red", label=f"当前: {prices_show[-1]}")
                     plt.show()
                 else:
                     print("⚠️ 未检测到 plotext 库，显示简易表格。请运行 pip install plotext 获取最佳体验。")

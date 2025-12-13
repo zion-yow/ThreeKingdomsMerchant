@@ -5,12 +5,12 @@ from game_data import ITEMS_CONFIG, HISTORY_TIMELINE
 
 def apply_history_events():
     """检查并应用当前时间的历史事件"""
-    year, season_idx, _ = state.get_date_by_turn(state.turn_counter).split("年") # 简单解析
-    # 这里为了方便直接使用 game_state 的属性
-    year, season_idx, _ = state.current_date
-    # ... (保持原有的事件逻辑不变，代码省略，直接复制之前的 apply_history_events 即可) ...
-    # 为了节省篇幅，这里假设你保留了之前定义的 apply_history_events 逻辑
-    # 关键是下面的 simulate_turn_fluctuation
+    
+    # --- 修复：直接通过回合数计算年份和季节，不再依赖字符串解析 ---
+    # 这样无论 UI 显示格式怎么变（"184年" 或 "184-Spring"），逻辑都不会崩
+    year = state.start_year + (state.turn_counter // 4)
+    season_idx = state.turn_counter % 4
+    # --------------------------------------------------------
     
     # 重置修正系数
     state.active_modifiers = {k: 1.0 for k in ITEMS_CONFIG.keys()}
@@ -52,9 +52,6 @@ def apply_history_events():
 def simulate_turn_fluctuation():
     """模拟回合结束时的市场波动，并记录历史"""
     
-    # 1. 推进之前先把当前价格存入历史 (作为本回合结束时的价格)
-    # 或者我们约定：price_history[t] 存储的是 第t回合结束后的价格
-    
     state.turn_counter += 1
     apply_history_events()
     
@@ -78,7 +75,7 @@ def simulate_turn_fluctuation():
             # 更新市场价格
             state.market_data[city_id][item_id] = final_price
             
-            # --- 关键新增：记录历史 ---
+            # --- 记录历史 ---
             if item_id not in state.price_history[city_id]:
                 state.price_history[city_id][item_id] = []
             
